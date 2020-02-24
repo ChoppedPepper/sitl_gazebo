@@ -420,6 +420,7 @@
              camera image size) -->
         <plugin name="GstCameraPlugin" filename="libgazebo_gst_camera_plugin.so">
             <robotNamespace></robotNamespace>
+            <udpHost>127.0.0.1</udpHost>
             <udpPort>5600</udpPort>
         </plugin>
         <plugin name="GeotaggedImagesPlugin" filename="libgazebo_geotagged_images_plugin.so">
@@ -427,6 +428,7 @@
             <interval>1</interval>
             <width>3840</width>
             <height>2160</height>
+            <maximum_zoom>8.0</maximum_zoom>
         </plugin>
       </sensor>
     </link>
@@ -1141,9 +1143,10 @@
 
     <include>
       <uri>model://sonar</uri>
+      <pose>-0.1 0 0 0 0 0</pose>
     </include>
     <joint name="sonar_joint" type="revolute">
-      <child>sonar_model::link</child>
+      <child>sonar::link</child>
       <parent>typhoon_h480::base_link</parent>
       <axis>
         <xyz>0 0 1</xyz>
@@ -1332,10 +1335,25 @@
         <robotNamespace></robotNamespace>
         <gpsNoise>true</gpsNoise>
     </plugin>
+    <plugin name='magnetometer_plugin' filename='libgazebo_magnetometer_plugin.so'>
+      <robotNamespace/>
+      <pubRate>20</pubRate>
+      <noiseDensity>0.0004</noiseDensity>
+      <randomWalk>6.4e-06</randomWalk>
+      <biasCorrelationTime>600</biasCorrelationTime>
+      <magTopic>/mag</magTopic>
+    </plugin>
+    <plugin name='barometer_plugin' filename='libgazebo_barometer_plugin.so'>
+      <robotNamespace/>
+      <pubRate>10</pubRate>
+      <baroTopic>/baro</baroTopic>
+    </plugin>
     <plugin name='mavlink_interface' filename='libgazebo_mavlink_interface.so'>
       <robotNamespace></robotNamespace>
       <imuSubTopic>/imu</imuSubTopic>
       <gpsSubTopic>/gps</gpsSubTopic>
+      <magSubTopic>/mag</magSubTopic>
+      <baroSubTopic>/baro</baroSubTopic>
       <mavlink_addr>INADDR_ANY</mavlink_addr>
       <mavlink_udp_port>14560</mavlink_udp_port>
       <serialEnabled>false</serialEnabled>
@@ -1343,10 +1361,13 @@
       <baudRate>921600</baudRate>
       <qgc_addr>INADDR_ANY</qgc_addr>
       <qgc_udp_port>14550</qgc_udp_port>
+      <sdk_addr>INADDR_ANY</sdk_addr>
+      <sdk_udp_port>14540</sdk_udp_port>
       <hil_mode>false</hil_mode>
       <hil_state_level>false</hil_state_level>
+      <enable_lockstep>true</enable_lockstep>
+      <use_tcp>true</use_tcp>
       <motorSpeedCommandPubTopic>/gazebo/command/motor_speed</motorSpeedCommandPubTopic>
-
       <control_channels>
         <channel name="rotor0">
           <input_index>0</input_index>
@@ -1557,9 +1578,9 @@
       <control_gimbal_channels>
         <channel>
           <joint_control_pid>
-            <p>1.0</p>
+            <p>0.8</p>
             <i>0.1</i>
-            <d>0.0005</d>
+            <d>0.02</d>
             <iMax>0</iMax>
             <iMin>0</iMin>
             <cmdMax>1.0</cmdMax>

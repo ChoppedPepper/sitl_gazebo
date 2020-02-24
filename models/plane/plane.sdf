@@ -1,3 +1,4 @@
+<?xml version="1.0"?>
 <sdf version='1.5'>
   <model name='plane'>
     <pose>0 0 0.246 0 0 0</pose>
@@ -86,48 +87,6 @@
         <use_parent_model_frame>1</use_parent_model_frame>
       </axis>
     </joint>
-    <link name="camera_link">
-      <inertial>
-        <!-- place holder -->
-        <pose>-0.041 0 -0.162 0 0 0</pose>
-        <mass>0.1</mass>
-        <inertia>
-          <ixx>0.001</ixx>
-          <ixy>0</ixy>
-          <ixz>0</ixz>
-          <iyy>0.001</iyy>
-          <iyz>0</iyz>
-          <izz>0.001</izz>
-        </inertia>
-      </inertial>
-      <sensor name="camera_imu" type="imu">
-        <always_on>1</always_on>
-      </sensor>
-      <sensor name="camera" type="camera">
-        <pose>-0.051 0 -0.162 0 0 3.14159</pose>
-        <camera>
-          <horizontal_fov>1.0</horizontal_fov>
-          <image>
-            <format>R8G8B8</format>
-            <width>640</width>
-            <height>360</height>
-          </image>
-          <clip>
-            <near>0.05</near>
-            <far>15000</far>
-          </clip>
-        </camera>
-        <always_on>1</always_on>
-        <update_rate>5</update_rate>
-        <visualize>false</visualize>
-        <plugin name="GeotaggedImagesPlugin" filename="libgazebo_geotagged_images_plugin.so">
-            <robotNamespace></robotNamespace>
-            <interval>1</interval>
-            <width>3840</width>
-            <height>2160</height>
-        </plugin>
-      </sensor>
-    </link>
     <link name='rotor_puller'>
       <pose>0.3 0 0.0 0 1.57 0</pose>
       <inertial>
@@ -208,6 +167,21 @@
         </inertia>
         <pose>0 0.3 0 0.00 0 0.0</pose>
       </inertial>
+      <visual name='left_elevon_visual'>
+        <pose>0.07 0.0 -0.08 0.00 0 0.0</pose>
+        <geometry>
+          <mesh>
+            <scale>0.1 0.1 0.1</scale>
+            <uri>model://plane/meshes/left_aileron.dae</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <script>
+            <name>Gazebo/Blue</name>
+            <uri>__default__</uri>
+          </script>
+        </material>
+      </visual>
     </link>
     <link name="right_elevon">
       <inertial>
@@ -222,6 +196,21 @@
         </inertia>
         <pose>0 -0.3 0 0.00 0 0.0</pose>
       </inertial>
+      <visual name='right_elevon_visual'>
+        <pose>0.07 0.0 -0.08 0.00 0 0.0</pose>
+        <geometry>
+          <mesh>
+            <scale>0.1 0.1 0.1</scale>
+            <uri>model://plane/meshes/right_aileron.dae</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <script>
+            <name>Gazebo/Blue</name>
+            <uri>__default__</uri>
+          </script>
+        </material>
+      </visual>
     </link>
     <link name="elevator">
       <inertial>
@@ -236,6 +225,21 @@
         </inertia>
         <pose> -0.5 0 0 0.00 0 0.0</pose>
       </inertial>
+      <visual name='elevator_visual'>
+        <pose>0.07 0.0 -0.08 0.00 0 0.0</pose>
+        <geometry>
+          <mesh>
+            <scale>0.1 0.1 0.1</scale>
+            <uri>model://plane/meshes/elevators.dae</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <script>
+            <name>Gazebo/Blue</name>
+            <uri>__default__</uri>
+          </script>
+        </material>
+      </visual>
     </link>
     <link name="rudder">
       <inertial>
@@ -250,11 +254,26 @@
         </inertia>
         <pose>-0.5 0 0.05 0 0 0 </pose>
       </inertial>
+      <visual name='rudder_visual'>
+        <pose>0.07 0.0 -0.08 0.00 0 0.0</pose>
+        <geometry>
+          <mesh>
+            <scale>0.1 0.1 0.1</scale>
+            <uri>model://plane/meshes/rudder.dae</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <script>
+            <name>Gazebo/Blue</name>
+            <uri>__default__</uri>
+          </script>
+        </material>
+      </visual>
     </link>
     <joint name='left_elevon_joint' type='revolute'>
       <parent>base_link</parent>
       <child>left_elevon</child>
-      <pose>0 0.3 0 0.00 0 0.0</pose>
+      <pose>-0.07 0.4 0.08 0.00 0 0.0</pose>
       <axis>
         <xyz>0 1 0</xyz>
         <limit>
@@ -275,7 +294,7 @@
     <joint name='right_elevon_joint' type='revolute'>
       <parent>base_link</parent>
       <child>right_elevon</child>
-      <pose>0 -0.3 0 0.00 0 0.0</pose>
+      <pose>-0.07 -0.4 0.08 0.00 0 0.0</pose>
       <axis>
         <xyz>0 1 0</xyz>
         <limit>
@@ -457,10 +476,25 @@
         <robotNamespace></robotNamespace>
         <gpsNoise>true</gpsNoise>
     </plugin>
+    <plugin name='magnetometer_plugin' filename='libgazebo_magnetometer_plugin.so'>
+      <robotNamespace/>
+      <pubRate>20</pubRate>
+      <noiseDensity>0.0004</noiseDensity>
+      <randomWalk>6.4e-06</randomWalk>
+      <biasCorrelationTime>600</biasCorrelationTime>
+      <magTopic>/mag</magTopic>
+    </plugin>
+    <plugin name='barometer_plugin' filename='libgazebo_barometer_plugin.so'>
+      <robotNamespace/>
+      <pubRate>10</pubRate>
+      <baroTopic>/baro</baroTopic>
+    </plugin>
     <plugin name='mavlink_interface' filename='libgazebo_mavlink_interface.so'>
       <robotNamespace></robotNamespace>
       <imuSubTopic>/imu</imuSubTopic>
       <gpsSubTopic>/gps</gpsSubTopic>
+      <magSubTopic>/mag</magSubTopic>
+      <baroSubTopic>/baro</baroSubTopic>
       <mavlink_addr>INADDR_ANY</mavlink_addr>
       <mavlink_udp_port>14560</mavlink_udp_port>
       <serialEnabled>false</serialEnabled>
@@ -468,8 +502,12 @@
       <baudRate>921600</baudRate>
       <qgc_addr>INADDR_ANY</qgc_addr>
       <qgc_udp_port>14550</qgc_udp_port>
+      <sdk_addr>INADDR_ANY</sdk_addr>
+      <sdk_udp_port>14540</sdk_udp_port>
       <hil_mode>false</hil_mode>
       <hil_state_level>false</hil_state_level>
+      <enable_lockstep>true</enable_lockstep>
+      <use_tcp>true</use_tcp>
       <motorSpeedCommandPubTopic>/gazebo/command/motor_speed</motorSpeedCommandPubTopic>
       <control_channels>
         <channel name="rotor4">

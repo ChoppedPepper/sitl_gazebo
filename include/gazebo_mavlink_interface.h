@@ -19,8 +19,10 @@
  * limitations under the License.
  */
 #include <vector>
+#include <regex>
 #include <thread>
 #include <mutex>
+#include <condition_variable>
 #include <deque>
 #include <atomic>
 #include <chrono>
@@ -63,14 +65,16 @@
 #include <IRLock.pb.h>
 #include <Groundtruth.pb.h>
 #include <Odometry.pb.h>
+#include <MagneticField.pb.h>
+#include <Pressure.pb.h>
 
 #include <mavlink/v2.0/common/mavlink.h>
 #include "msgbuffer.h"
 
-#include <geo_mag_declination.h>
-
 static const uint32_t kDefaultMavlinkUdpPort = 14560;
+static const uint32_t kDefaultMavlinkTcpPort = 4560;
 static const uint32_t kDefaultQGCUdpPort = 14550;
+static const uint32_t kDefaultSDKUdpPort = 14540;
 
 using lock_guard = std::lock_guard<std::recursive_mutex>;
 static constexpr auto kDefaultDevice = "/dev/ttyACM0";
@@ -79,6 +83,10 @@ static constexpr auto kDefaultBaudRate = 921600;
 //! Maximum buffer size with padding for CRC bytes (280 + padding)
 static constexpr ssize_t MAX_SIZE = MAVLINK_MAX_PACKET_LEN + 16;
 static constexpr size_t MAX_TXQ_SIZE = 1000;
+
+//! Default distance sensor model joint naming
+static const std::regex kDefaultLidarModelLinkNaming("(lidar|sf10a)(.*::link)");
+static const std::regex kDefaultSonarModelLinkNaming("(sonar|mb1240-xl-ez4)(.*::link)");
 
 namespace gazebo {
 
@@ -91,6 +99,11 @@ typedef const boost::shared_ptr<const sensor_msgs::msgs::OpticalFlow> OpticalFlo
 typedef const boost::shared_ptr<const sensor_msgs::msgs::Range> SonarPtr;
 typedef const boost::shared_ptr<const sensor_msgs::msgs::Range> LidarPtr;
 typedef const boost::shared_ptr<const sensor_msgs::msgs::SITLGps> GpsPtr;
+typedef const boost::shared_ptr<const sensor_msgs::msgs::MagneticField> MagnetometerPtr;
+typedef const boost::shared_ptr<const sensor_msgs::msgs::Pressure> BarometerPtr;
+
+typedef std::pair<const int, const ignition::math::Quaterniond> SensorIdRot_P;
+typedef std::map<transport::SubscriberPtr, SensorIdRot_P > Sensor_M;
 
 // Default values
 static const std::string kDefaultNamespace = "";
@@ -100,12 +113,12 @@ static const std::string kDefaultNamespace = "";
 static const std::string kDefaultMotorVelocityReferencePubTopic = "/gazebo/command/motor_speed";
 
 static const std::string kDefaultImuTopic = "/imu";
-static const std::string kDefaultLidarTopic = "/link/lidar";
 static const std::string kDefaultOpticalFlowTopic = "/px4flow/link/opticalFlow";
-static const std::string kDefaultSonarTopic = "/sonar_model/link/sonar";
 static const std::string kDefaultIRLockTopic = "/camera/link/irlock";
 static const std::string kDefaultGPSTopic = "/gps";
 static const std::string kDefaultVisionTopic = "/vision_odom";
+static const std::string kDefaultMagTopic = "/mag";
+static const std::string kDefaultBarometerTopic = "/baro";
 
 //! Rx packer framing status. (same as @p mavlink::mavlink_framing_t)
 enum class Framing : uint8_t {
@@ -118,7 +131,7 @@ enum class Framing : uint8_t {
 class GazeboMavlinkInterface : public ModelPlugin {
 public:
   GazeboMavlinkInterface() : ModelPlugin(),
-    received_first_referenc_(false),
+    received_first_actuator_(false),
     namespace_(kDefaultNamespace),
     protocol_version_(2.0),
     motor_velocity_reference_pub_topic_(kDefaultMotorVelocityReferencePubTopic),
@@ -131,11 +144,12 @@ public:
     send_odometry_(false),
     imu_sub_topic_(kDefaultImuTopic),
     opticalFlow_sub_topic_(kDefaultOpticalFlowTopic),
-    lidar_sub_topic_(kDefaultLidarTopic),
-    sonar_sub_topic_(kDefaultSonarTopic),
     irlock_sub_topic_(kDefaultIRLockTopic),
     gps_sub_topic_(kDefaultGPSTopic),
     vision_sub_topic_(kDefaultVisionTopic),
+    mag_sub_topic_(kDefaultMagTopic),
+    baro_sub_topic_(kDefaultBarometerTopic),
+    sensor_map_ {},
     model_ {},
     world_(nullptr),
     left_elevon_joint_(nullptr),
@@ -154,7 +168,18 @@ public:
     groundtruth_lon_rad(0.0),
     groundtruth_altitude(0.0),
     mavlink_udp_port_(kDefaultMavlinkUdpPort),
+    mavlink_tcp_port_(kDefaultMavlinkTcpPort),
+    simulator_socket_fd_(0),
+    simulator_tcp_client_fd_(0),
+    use_tcp_(false),
     qgc_udp_port_(kDefaultQGCUdpPort),
+    sdk_udp_port_(kDefaultSDKUdpPort),
+    remote_qgc_addr_ {},
+    local_qgc_addr_ {},
+    remote_sdk_addr_ {},
+    local_sdk_addr_ {},
+    qgc_socket_fd_(0),
+    sdk_socket_fd_(0),
     serial_enabled_(false),
     tx_q {},
     rx_buf {},
@@ -165,9 +190,7 @@ public:
     device_(kDefaultDevice),
     baudrate_(kDefaultBaudRate),
     hil_mode_(false),
-    hil_state_level_(false),
-    baro_rnd_y2_(0.0),
-    baro_rnd_use_last_(false)
+    hil_state_level_(false)
     {}
 
   ~GazeboMavlinkInterface();
@@ -179,7 +202,7 @@ protected:
   void OnUpdate(const common::UpdateInfo&  /*_info*/);
 
 private:
-  bool received_first_referenc_;
+  bool received_first_actuator_;
   Eigen::VectorXd input_reference_;
 
   float protocol_version_;
@@ -221,20 +244,52 @@ private:
 
   /// \brief Pointer to the update event connection.
   event::ConnectionPtr updateConnection_;
+  event::ConnectionPtr sigIntConnection_;
 
   boost::thread callback_queue_thread_;
   void QueueThread();
   void ImuCallback(ImuPtr& imu_msg);
   void GpsCallback(GpsPtr& gps_msg);
   void GroundtruthCallback(GtPtr& groundtruth_msg);
-  void LidarCallback(LidarPtr& lidar_msg);
-  void SonarCallback(SonarPtr& sonar_msg);
+  void LidarCallback(LidarPtr& lidar_msg, const int& id);
+  void SonarCallback(SonarPtr& sonar_msg, const int& id);
   void OpticalFlowCallback(OpticalFlowPtr& opticalFlow_msg);
   void IRLockCallback(IRLockPtr& irlock_msg);
   void VisionCallback(OdomPtr& odom_msg);
-  void send_mavlink_message(const mavlink_message_t *message, const int destination_port = 0);
-  void handle_message(mavlink_message_t *msg);
-  void pollForMAVLinkMessages(double _dt, uint32_t _timeoutMs);
+  void MagnetometerCallback(MagnetometerPtr& mag_msg);
+  void BarometerCallback(BarometerPtr& baro_msg);
+  void send_mavlink_message(const mavlink_message_t *message);
+  void forward_mavlink_message(const mavlink_message_t *message);
+  void handle_message(mavlink_message_t *msg, bool &received_actuator);
+  void acceptConnections();
+  void pollForMAVLinkMessages();
+  void pollFromQgcAndSdk();
+  void SendSensorMessages();
+  void handle_control(double _dt);
+  bool IsRunning();
+  void onSigInt();
+
+  /**
+   * @brief Set the MAV_SENSOR_ORIENTATION enum value based on the sensor orientation
+   *
+   * @param[in] rootModel		The root model where the sensor is attached
+   * @param[in] u_Xs				Unit vector of X-axis sensor in `base_link` frame
+   * @param[in] sensor_msg	The Mavlink DISTANCE_SENSOR message struct
+   */
+  template <class T>
+  void setMavlinkSensorOrientation(const ignition::math::Vector3d& u_Xs, T& sensor_msg);
+
+  /**
+   * @brief A helper class that allows the creation of multiple subscriptions to sensors.
+   *	    It gets the sensor link/joint and creates the subscriptions based on those.
+   *	    It also allows to set the initial rotation of the sensor, to allow computing
+   *	    the sensor orientation quaternion.
+   * @details GazeboMsgT  The type of the message that will be subscribed to the Gazebo framework.
+   */
+  template <typename GazeboMsgT>
+  void CreateSensorSubscription(
+      void (GazeboMavlinkInterface::*fp)(const boost::shared_ptr<GazeboMsgT const>&, const int&),
+      GazeboMavlinkInterface* ptr, const physics::Link_V& links);
 
   // Serial interface
   void open();
@@ -247,9 +302,6 @@ private:
   }
 
   static const unsigned n_out_max = 16;
-  double alt_home = 488.0;   // meters
-
-  unsigned _rotor_count;
 
   double input_offset_[n_out_max];
   double input_scaling_[n_out_max];
@@ -261,23 +313,28 @@ private:
   transport::PublisherPtr joint_control_pub_[n_out_max];
 
   transport::SubscriberPtr imu_sub_;
-  transport::SubscriberPtr lidar_sub_;
-  transport::SubscriberPtr sonar_sub_;
   transport::SubscriberPtr opticalFlow_sub_;
   transport::SubscriberPtr irlock_sub_;
   transport::SubscriberPtr gps_sub_;
   transport::SubscriberPtr groundtruth_sub_;
   transport::SubscriberPtr vision_sub_;
+  transport::SubscriberPtr mag_sub_;
+  transport::SubscriberPtr baro_sub_;
+
+  Sensor_M sensor_map_; // Map of sensor SubscriberPtr, IDs and orientations
 
   std::string imu_sub_topic_;
-  std::string lidar_sub_topic_;
   std::string opticalFlow_sub_topic_;
-  std::string sonar_sub_topic_;
   std::string irlock_sub_topic_;
   std::string gps_sub_topic_;
   std::string groundtruth_sub_topic_;
   std::string vision_sub_topic_;
+  std::string mag_sub_topic_;
+  std::string baro_sub_topic_;
 
+  std::mutex last_imu_message_mutex_ {};
+  std::condition_variable last_imu_message_cond_ {};
+  sensor_msgs::msgs::Imu last_imu_message_;
   common::Time last_time_;
   common::Time last_imu_time_;
   common::Time last_actuator_time_;
@@ -286,35 +343,63 @@ private:
   double groundtruth_lon_rad;
   double groundtruth_altitude;
 
-  double imu_update_interval_ = 0.004;
-
-  void handle_control(double _dt);
+  double imu_update_interval_ = 0.004; ///< Used for non-lockstep
 
   ignition::math::Vector3d gravity_W_;
   ignition::math::Vector3d velocity_prev_W_;
-  ignition::math::Vector3d mag_d_;
+  ignition::math::Vector3d mag_n_;
 
-  std::default_random_engine rand_;
-  std::normal_distribution<float> randn_;
+  double temperature_;
+  double pressure_alt_;
+  double abs_pressure_;
 
-  int _fd;
-  struct sockaddr_in _myaddr;     ///< The locally bound address
-  struct sockaddr_in _srcaddr;    ///< SITL instance
-  socklen_t _addrlen;
+  std::default_random_engine random_generator_;
+  std::normal_distribution<float> standard_normal_distribution_;
+
+  struct sockaddr_in local_simulator_addr_;
+  socklen_t local_simulator_addr_len_;
+  struct sockaddr_in remote_simulator_addr_;
+  socklen_t remote_simulator_addr_len_;
+
+  int qgc_udp_port_;
+  struct sockaddr_in remote_qgc_addr_;
+  socklen_t remote_qgc_addr_len_;
+  struct sockaddr_in local_qgc_addr_;
+  socklen_t local_qgc_addr_len_;
+
+  int sdk_udp_port_;
+  struct sockaddr_in remote_sdk_addr_;
+  socklen_t remote_sdk_addr_len_;
+  struct sockaddr_in local_sdk_addr_;
+  socklen_t local_sdk_addr_len_;
+
   unsigned char _buf[65535];
-  struct pollfd fds[1];
+  enum FD_TYPES {
+    LISTEN_FD,
+    CONNECTION_FD,
+    N_FDS
+  };
+  struct pollfd fds_[N_FDS];
+  bool use_tcp_ = false;
+  bool close_conn_ = false;
 
-  struct sockaddr_in _srcaddr_2;  ///< MAVROS
-
-  //so we dont have to do extra callbacks
   double optflow_distance;
   double sonar_distance;
 
   in_addr_t mavlink_addr_;
-  int mavlink_udp_port_;
+  int mavlink_udp_port_; // MAVLink refers to the PX4 simulator interface here
+  int mavlink_tcp_port_; // MAVLink refers to the PX4 simulator interface here
 
-  in_addr_t qgc_addr_;
-  int qgc_udp_port_;
+  int simulator_socket_fd_;
+  int simulator_tcp_client_fd_;
+
+  int qgc_socket_fd_ {-1};
+  int sdk_socket_fd_ {-1};
+
+  bool enable_lockstep_ = false;
+  double speed_factor_ = 1.0;
+  int64_t previous_imu_seq_ = 0;
+  unsigned update_skip_factor_ = 1;
 
   // Serial interface
   mavlink_status_t m_status;
@@ -333,9 +418,6 @@ private:
   bool hil_mode_;
   bool hil_state_level_;
 
-  // state variables for baro pressure sensor random noise generator
-  double baro_rnd_y2_;
-  bool baro_rnd_use_last_;
-
-  };
+  std::atomic<bool> gotSigInt_ {false};
+};
 }

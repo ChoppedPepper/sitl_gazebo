@@ -34,7 +34,8 @@ GpsPlugin::GpsPlugin() : ModelPlugin()
 
 GpsPlugin::~GpsPlugin()
 {
-  updateConnection_->~Connection();
+    if (updateConnection_)
+      updateConnection_->~Connection();
 }
 
 void GpsPlugin::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf)
@@ -66,14 +67,24 @@ void GpsPlugin::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf)
   if (env_lat) {
     gzmsg << "Home latitude is set to " << env_lat << ".\n";
     lat_home = std::stod(env_lat) * M_PI / 180.0;
+  } else if(_sdf->HasElement("homeLatitude")) {
+    double latitude;
+    getSdfParam<double>(_sdf, "homeLatitude", latitude, 47.397742);
+    lat_home = latitude * M_PI / 180.0;
   }
   if (env_lon) {
     gzmsg << "Home longitude is set to " << env_lon << ".\n";
     lon_home = std::stod(env_lon) * M_PI / 180.0;
+  } else if(_sdf->HasElement("homeLongitude")) {
+    double longitude;
+    getSdfParam<double>(_sdf, "homeLongitude", longitude, 8.545594);
+    lon_home = longitude * M_PI / 180.0;
   }
   if (env_alt) {
     gzmsg << "Home altitude is set to " << env_alt << ".\n";
     alt_home = std::stod(env_alt);
+  } else if(_sdf->HasElement("homeAltitude")) {
+    getSdfParam<double>(_sdf, "homeAltitude", alt_home, alt_home);
   }
 
   namespace_.clear();
@@ -206,7 +217,7 @@ void GpsPlugin::OnUpdate(const common::UpdateInfo&){
   groundtruth_msg.set_time_usec(current_time.Double() * 1e6);
   groundtruth_msg.set_latitude_rad(latlon_gt.first);
   groundtruth_msg.set_longitude_rad(latlon_gt.second);
-  groundtruth_msg.set_altitude(-pos_W_I.Z() + alt_home);
+  groundtruth_msg.set_altitude(pos_W_I.Z() + alt_home);
   groundtruth_msg.set_velocity_east(velocity_current_W.X());
   groundtruth_msg.set_velocity_north(velocity_current_W.Y());
   groundtruth_msg.set_velocity_up(velocity_current_W.Z());

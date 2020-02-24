@@ -34,14 +34,13 @@
 
 #include <opencv2/opencv.hpp>
 #include <iostream>
-#include <boost/timer/timer.hpp>
 #include <ignition/math.hh>
 
 #include "flow_opencv.hpp"
 #include "flow_px4.hpp"
 
 #define DEFAULT_RATE 20
-#define HAS_GYRO TRUE
+#define HAS_GYRO true
 
 using namespace cv;
 using namespace std;
@@ -77,7 +76,6 @@ namespace gazebo
       ignition::math::Vector3d opticalFlow_rate;
       std::string namespace_;
       std::string gyro_sub_topic_;
-      boost::timer::cpu_timer timer_;
       OpticalFlowOpenCV *optical_flow_;
       // OpticalFlowPX4 *optical_flow_;
 

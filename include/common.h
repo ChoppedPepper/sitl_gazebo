@@ -22,9 +22,11 @@
 
 
 #include <tinyxml.h>
+#include <typeinfo>
 #include <Eigen/Dense>
 #include <gazebo/gazebo.hh>
 #include <ignition/math.hh>
+#include "gazebo/physics/physics.hh"
 
 namespace gazebo {
 
@@ -65,7 +67,7 @@ void model_param(const std::string& world_name, const std::string& model_name, c
 
     TiXmlElement* e_model = h_root.FirstChild("model").Element();
 
-    for( e_model; e_model; e_model=e_model->NextSiblingElement("model") )
+    for( ; e_model != nullptr; e_model=e_model->NextSiblingElement("model") )
     {
       const char* attr_name = e_model->Attribute("name");
       if (attr_name)
@@ -104,7 +106,7 @@ void model_param(const std::string& world_name, const std::string& model_name, c
 /**
  * \brief Get a math::Angle as an angle from [0, 360)
  */
-double GetDegrees360(const ignition::math::Angle& angle) {
+inline double GetDegrees360(const ignition::math::Angle& angle) {
   double degrees = angle.Degree();
   while (degrees < 0.) degrees += 360.0;
   while (degrees >= 360.0) degrees -= 360.0;
@@ -163,7 +165,11 @@ discretized system (ZoH):
     T previousState_;
 };
 
-
+/// Returns scalar value constrained by (min_val, max_val)
+template<typename Scalar>
+static inline constexpr const Scalar &constrain(const Scalar &val, const Scalar &min_val, const Scalar &max_val) {
+    return (val < min_val) ? min_val : ((val > max_val) ? max_val : val);
+}
 
 /// Computes a quaternion from the 3-element small angle approximation theta.
 template<class Derived>
@@ -225,5 +231,13 @@ static const auto q_ng = ignition::math::Quaterniond(0, 0.70711, 0.70711, 0);
  * to Forward, Left, Up (base_link) frames and vice-versa.
  */
 static const auto q_br = ignition::math::Quaterniond(0, 1, 0, 0);
+
+// sensor X-axis unit vector in `base_link` frame
+static const ignition::math::Vector3d kDownwardRotation = ignition::math::Vector3d(0, 0, -1);
+static const ignition::math::Vector3d kUpwardRotation = ignition::math::Vector3d(0, 0, 1);
+static const ignition::math::Vector3d kBackwardRotation = ignition::math::Vector3d(-1, 0, 0);
+static const ignition::math::Vector3d kForwardRotation = ignition::math::Vector3d(1, 0, 0);
+static const ignition::math::Vector3d kLeftRotation = ignition::math::Vector3d(0, 1, 0);
+static const ignition::math::Vector3d kRightRotation = ignition::math::Vector3d(0, -1, 0);
 
 #endif  // SITL_GAZEBO_COMMON_H_
